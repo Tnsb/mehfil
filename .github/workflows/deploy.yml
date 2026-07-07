@@ -7,6 +7,11 @@ on:
 
 permissions:
   contents: write
+  pages: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -26,8 +31,26 @@ jobs:
           npm install
           npm run build
 
-      - name: Publish to gh-pages branch
+      - name: Point Pages at gh-pages branch
+        continue-on-error: true
+        run: |
+          BODY='{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/pages" \
+            -d "$BODY" || \
+          curl -sf -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/pages" \
+            -d "$BODY"
+
+      - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: website/dist
+          force_orphan: true
