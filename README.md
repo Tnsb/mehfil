@@ -1,8 +1,9 @@
 # plot
 
-Landing page for **plot** — AI-native hosting for run clubs, supper clubs, tech hangs, and intimate IRL events.
+**plot** — AI-native hosting for run clubs, supper clubs, tech hangs, and intimate IRL events.
 
-The site lives in [`website/`](website/).
+- [`website/`](website/) — the landing page
+- [`app/`](app/) — the app: an AI-native party OS (Next.js + agent tool registry, AI Cohost, One Shot, AfterParty Drop, Taps). See [app/README.md](app/README.md) to run it locally.
 
 **Live site:** [https://tnsb.github.io/plot/](https://tnsb.github.io/plot/)
 

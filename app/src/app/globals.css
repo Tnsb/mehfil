@@ -1,0 +1,193 @@
+@import "tailwindcss";
+
+/*
+  TABLE design tokens — "warm editorial dinner party".
+  The neutral is cream, never gray. The agent gets its own color (grape).
+*/
+@theme {
+  /* palette */
+  --color-cream: #fff6ec;
+  --color-cream-deep: #fdecd8;
+  --color-card: #fffdf9;
+  --color-ink: #241a32;
+  --color-ink-soft: #5c5170;
+  --color-ink-faint: #8d8399;
+  --color-tangerine: #ff5c38;
+  --color-tangerine-deep: #e04628;
+  --color-raspberry: #e5397f;
+  --color-butter: #ffc94a;
+  --color-butter-soft: #fff1cf;
+  --color-mint: #2fbf9b;
+  --color-mint-soft: #e2f7f1;
+  --color-grape: #6c4ab6;
+  --color-grape-soft: #f0eafb;
+  --color-blush: #ffe4dc;
+
+  /* shape */
+  --radius-card: 20px;
+  --radius-field: 14px;
+
+  /* motion */
+  --ease-snappy: cubic-bezier(0.2, 0.9, 0.3, 1);
+
+  /* warm shadows: tinted ink, never gray */
+  --shadow-warm: 0 2px 6px rgba(36, 26, 50, 0.06), 0 12px 32px rgba(36, 26, 50, 0.08);
+  --shadow-warm-lg: 0 4px 12px rgba(36, 26, 50, 0.08), 0 24px 56px rgba(224, 70, 40, 0.14);
+}
+
+/* fonts come from next/font CSS variables, so they must be inlined */
+@theme inline {
+  --font-display: var(--font-fraunces), "Fraunces", Georgia, serif;
+  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-butter);
+  color: var(--color-ink);
+}
+
+/* ---- reusable primitives ---- */
+
+.hero-gradient {
+  background: linear-gradient(120deg, #e5397f, #ff5c38 52%, #ffc94a);
+}
+
+.hero-gradient-animated {
+  background: linear-gradient(120deg, #e5397f, #ff5c38 40%, #ffc94a 70%, #e5397f);
+  background-size: 240% 240%;
+  animation: gradient-drift 14s ease infinite;
+}
+
+@keyframes gradient-drift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+  padding: 0.7rem 1.4rem;
+  font-size: 0.95rem;
+  transition: transform 180ms var(--ease-snappy), box-shadow 180ms var(--ease-snappy),
+    background-color 180ms var(--ease-snappy), opacity 180ms var(--ease-snappy);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-tangerine);
+  color: white;
+  box-shadow: 0 6px 18px rgba(224, 70, 40, 0.35);
+}
+.btn-primary:hover {
+  background: var(--color-tangerine-deep);
+  transform: translateY(-1px);
+}
+
+.btn-ink {
+  background: var(--color-ink);
+  color: var(--color-cream);
+}
+.btn-ink:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-ink);
+  border: 1.5px solid rgba(36, 26, 50, 0.18);
+}
+.btn-ghost:hover {
+  border-color: var(--color-ink);
+  transform: translateY(-1px);
+}
+
+.btn-grape {
+  background: var(--color-grape);
+  color: white;
+  box-shadow: 0 6px 18px rgba(108, 74, 182, 0.35);
+}
+.btn-grape:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.card {
+  background: var(--color-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-warm);
+  border: 1px solid rgba(36, 26, 50, 0.05);
+}
+
+.field {
+  width: 100%;
+  background: white;
+  border: 1.5px solid rgba(36, 26, 50, 0.14);
+  border-radius: var(--radius-field);
+  padding: 0.7rem 0.95rem;
+  font-size: 1rem;
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color 180ms var(--ease-snappy), box-shadow 180ms var(--ease-snappy);
+}
+.field:focus {
+  border-color: var(--color-tangerine);
+  box-shadow: 0 0 0 4px rgba(255, 92, 56, 0.14);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* the address-reveal "wax seal" moment */
+@keyframes reveal-open {
+  0% { opacity: 0; transform: scale(0.92) translateY(10px); }
+  60% { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.reveal-open {
+  animation: reveal-open 600ms var(--ease-snappy) both;
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 420ms var(--ease-snappy) both;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.typing-dot {
+  animation: pulse-dot 1.2s ease infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
