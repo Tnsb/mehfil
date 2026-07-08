@@ -4,34 +4,90 @@
  */
 import { z } from "zod";
 import { db, tables } from "@/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
-import { newId } from "@/lib/ids";
+import { and, asc, eq, inArray, ne, isNotNull } from "drizzle-orm";
+import { newId, newToken } from "@/lib/ids";
 import { emitDomainEvent } from "@/events/bus";
 import { getPaymentProvider } from "@/payments";
 import { assignPersona, assignBringItem } from "@/cohost/vibes";
+import { teamFromVibe } from "@/themes";
+import type { Event, TicketKind } from "@/db/schema";
 import { defineTool, ok, err, requireUser, ToolError } from "../types";
 import { eventView, seatsTaken, getEventOrThrow, formatPrice } from "./helpers";
+
+/** mystery = 20% off (blind); duo = 10% off per seat, buys two */
+export function effectivePriceCents(event: Event, kind: TicketKind): number {
+  if (kind === "mystery") return Math.round(event.priceCents * 0.8);
+  if (kind === "duo_lead") return Math.round(event.priceCents * 0.9) * 2;
+  if (kind === "duo_guest") return 0; // covered by the lead
+  return event.priceCents;
+}
+
+/** Is this user a past guest of the event's show (or its parent event)? */
+async function hasFirstAccess(userId: string, event: Event): Promise<boolean> {
+  const priorEventIds: string[] = [];
+  if (event.parentEventId) priorEventIds.push(event.parentEventId);
+  if (event.showId) {
+    const siblings = await db
+      .select({ id: tables.events.id })
+      .from(tables.events)
+      .where(and(eq(tables.events.showId, event.showId), ne(tables.events.id, event.id)));
+    priorEventIds.push(...siblings.map((s) => s.id));
+  }
+  if (priorEventIds.length === 0) return false;
+  const [prior] = await db
+    .select({ id: tables.tickets.id })
+    .from(tables.tickets)
+    .where(
+      and(
+        eq(tables.tickets.userId, userId),
+        eq(tables.tickets.status, "paid"),
+        inArray(tables.tickets.eventId, priorEventIds),
+      ),
+    );
+  return !!prior;
+}
 
 export const bookSeat = defineTool({
   name: "book_seat",
   description:
-    "Book a seat at a published event for the current user. If seats are available this reserves one and returns a payment link the guest must complete (free events confirm instantly). If the event is full, the guest joins the waitlist. Answers to the event's checkout questions (e.g. dietary restrictions) can be passed in `answers`.",
+    "Book a seat at a published event for the current user. Kinds: 'standard'; 'mystery' (the one blind seat, 20% off, only if the host enabled it); 'duo' (two seats at 10% off each — returns a claim link for a +1 who must be NEW to plot). Free events confirm instantly unless they carry a refundable deposit (hold released at door check-in). Full events join the waitlist. Pass vibeAnswers from the vibe-check quiz, acceptWaiver=true for events requiring one (e.g. run clubs), and referredBy when the guest came through someone's referral link.",
   inputSchema: z.object({
     eventId: z.string(),
     answers: z
       .record(z.string(), z.string())
       .optional()
       .describe("Answers keyed by question key, e.g. {\"dietary\": \"vegetarian\"}"),
+    kind: z.enum(["standard", "mystery", "duo"]).default("standard"),
+    vibeAnswers: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Vibe-check quiz answers keyed by question id"),
+    acceptWaiver: z.boolean().optional(),
+    referredBy: z.string().optional().describe("User id from a referral link"),
   }),
   agentCallable: true,
   execute: async (ctx, input) => {
     const userId = requireUser(ctx);
     const event = await getEventOrThrow(input.eventId);
 
-    if (event.hostId === userId) return err("Hosts don't need a ticket to their own dinner.");
+    if (event.hostId === userId) return err("Hosts don't need a ticket to their own night.");
     if (event.status !== "published" && event.status !== "sold_out")
       return err(`This event is not open for booking (status: ${event.status}).`);
     if (event.startsAt < new Date()) return err("This event has already happened.");
+
+    // drop mechanics: early-access window for past guests of the show
+    if (event.publicAt && event.publicAt > new Date() && !(await hasFirstAccess(userId, event))) {
+      return err(
+        `Early access: this drop opens to everyone at ${event.publicAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Guests from previous episodes get first dibs.`,
+      );
+    }
+
+    // waivers for physical events (run clubs)
+    const needsWaiver = event.template === "run_club";
+    if (needsWaiver && !input.acceptWaiver)
+      return err(
+        "This event requires accepting the activity waiver (you confirm you're participating at your own risk). Pass acceptWaiver=true.",
+      );
 
     const [existing] = await db
       .select()
@@ -54,8 +110,33 @@ export const bookSeat = defineTool({
       });
     }
 
+    // resolve kind
+    let kind: TicketKind = "standard";
+    if (input.kind === "mystery") {
+      if (!event.mysterySeat) return err("This event doesn't have a mystery seat.");
+      const [takenMystery] = await db
+        .select({ id: tables.tickets.id })
+        .from(tables.tickets)
+        .where(
+          and(
+            eq(tables.tickets.eventId, event.id),
+            eq(tables.tickets.kind, "mystery"),
+            inArray(tables.tickets.status, ["paid", "pending"]),
+          ),
+        );
+      if (takenMystery) return err("The mystery seat is gone — someone braver got there first.");
+      kind = "mystery";
+    } else if (input.kind === "duo") {
+      if (!event.duoTickets) return err("This event doesn't offer duo tickets.");
+      kind = "duo_lead";
+    }
+
+    const seatsNeeded = kind === "duo_lead" ? 2 : 1;
     const taken = await seatsTaken(event.id);
-    const full = taken >= event.capacity;
+    const full = taken + seatsNeeded > event.capacity;
+
+    if (full && kind !== "standard")
+      return err("Not enough seats left for that — a standard seat may still fit.");
 
     const ticketId = newId("tkt");
     const [ticket] = await db
@@ -66,6 +147,11 @@ export const bookSeat = defineTool({
         userId,
         status: full ? "waitlisted" : "pending",
         answers: input.answers ?? {},
+        kind,
+        vibeAnswers: input.vibeAnswers ?? null,
+        team: input.vibeAnswers ? teamFromVibe(input.vibeAnswers) : null,
+        waiverAcceptedAt: needsWaiver ? new Date() : null,
+        referredBy: input.referredBy ?? null,
       })
       .returning();
 
@@ -84,8 +170,11 @@ export const bookSeat = defineTool({
       });
     }
 
-    // free events skip payment entirely
-    if (event.priceCents === 0) {
+    const dueCents =
+      event.priceCents > 0 ? effectivePriceCents(event, kind) : event.depositCents;
+
+    // free events with no deposit confirm instantly
+    if (dueCents === 0) {
       return await markTicketPaid(ticket.id, userId);
     }
 
@@ -98,14 +187,18 @@ export const bookSeat = defineTool({
       actorId: userId,
       subjectType: "ticket",
       subjectId: ticketId,
-      payload: { eventId: event.id, userId, price: formatPrice(event.priceCents) },
+      payload: { eventId: event.id, userId, price: formatPrice(dueCents), kind },
     });
 
+    const isDeposit = event.priceCents === 0;
     return ok({
       ticketId,
       status: "pending",
+      kind,
       paymentUrl: checkout.url,
-      message: `Seat reserved at ${event.title} (${formatPrice(event.priceCents)}). Complete payment at the payment link — the address unlocks right after.`,
+      message: isDeposit
+        ? `Seat reserved at ${event.title} with a ${formatPrice(dueCents)} refundable hold — it comes back the moment you check in at the door.`
+        : `Seat${kind === "duo_lead" ? "s" : ""} reserved at ${event.title} (${formatPrice(dueCents)}${kind === "mystery" ? ", mystery discount applied" : kind === "duo_lead" ? " for two, duo discount applied" : ""}). Complete payment at the payment link — the address unlocks right after.`,
     });
   },
 });
@@ -121,6 +214,22 @@ export async function markTicketPaid(ticketId: string, actorId: string | null) {
 
   const event = await getEventOrThrow(ticket.eventId);
 
+  // bib numbers for run-club episodes
+  let bibNumber: number | null = null;
+  if (event.template === "run_club") {
+    const paid = await db
+      .select({ id: tables.tickets.id })
+      .from(tables.tickets)
+      .where(
+        and(
+          eq(tables.tickets.eventId, event.id),
+          eq(tables.tickets.status, "paid"),
+          isNotNull(tables.tickets.bibNumber),
+        ),
+      );
+    bibNumber = paid.length + 1;
+  }
+
   // joining the party: seat confirmed + personalized invite persona + bring duty
   await db
     .update(tables.tickets)
@@ -129,8 +238,27 @@ export async function markTicketPaid(ticketId: string, actorId: string | null) {
       paidAt: new Date(),
       persona: assignPersona(ticketId),
       bringItem: assignBringItem(ticketId),
+      // free events with a deposit: the hold is now in place until check-in
+      depositStatus: event.priceCents === 0 && event.depositCents > 0 ? "held" : null,
+      bibNumber,
     })
     .where(eq(tables.tickets.id, ticketId));
+
+  // duo: create the +1's claimable seat alongside the lead's
+  let duoClaimUrl: string | null = null;
+  if (ticket.kind === "duo_lead") {
+    const claimCode = newToken().slice(0, 12);
+    await db.insert(tables.tickets).values({
+      id: newId("tkt"),
+      eventId: event.id,
+      userId: ticket.userId, // parked on the lead until claimed
+      status: "paid",
+      kind: "duo_guest",
+      claimCode,
+      answers: {},
+    });
+    duoClaimUrl = `/claim/${claimCode}`;
+  }
 
   await emitDomainEvent({
     type: "ticket.paid",
@@ -159,9 +287,112 @@ export async function markTicketPaid(ticketId: string, actorId: string | null) {
     ticketId,
     status: "paid",
     address: event.locationAddress,
-    message: `Confirmed! The address is unlocked: ${event.locationAddress ?? "see event page"}.`,
+    ...(duoClaimUrl ? { duoClaimUrl } : {}),
+    message: duoClaimUrl
+      ? `Confirmed for two! The address is unlocked: ${event.locationAddress ?? "see event page"}. Send your +1 the claim link — they must be new to plot: ${duoClaimUrl}`
+      : `Confirmed! The address is unlocked: ${event.locationAddress ?? "see event page"}.`,
   });
 }
+
+export const claimDuoSeat = defineTool({
+  name: "claim_duo_seat",
+  description:
+    "Claim the +1 seat of a duo ticket using its claim code. The claimer must be NEW to plot (no previous paid tickets) — duo tickets exist to bring new people in.",
+  inputSchema: z.object({ claimCode: z.string() }),
+  agentCallable: true,
+  execute: async (ctx, input) => {
+    const userId = requireUser(ctx);
+    const [seat] = await db
+      .select()
+      .from(tables.tickets)
+      .where(and(eq(tables.tickets.claimCode, input.claimCode), eq(tables.tickets.kind, "duo_guest")));
+    if (!seat) return err("That claim link isn't valid (or was already used).");
+    if (seat.userId === userId) return err("You bought this duo — send the link to your +1.");
+
+    const prior = await db
+      .select({ id: tables.tickets.id })
+      .from(tables.tickets)
+      .where(and(eq(tables.tickets.userId, userId), eq(tables.tickets.status, "paid")));
+    if (prior.length > 0)
+      return err("Duo +1 seats are for people new to plot — you're already one of us. Book your own seat!");
+
+    const event = await getEventOrThrow(seat.eventId);
+    await db
+      .update(tables.tickets)
+      .set({
+        userId,
+        claimCode: null,
+        persona: assignPersona(seat.id),
+        bringItem: assignBringItem(seat.id),
+        paidAt: new Date(),
+      })
+      .where(eq(tables.tickets.id, seat.id));
+
+    await emitDomainEvent({
+      type: "ticket.paid",
+      actorId: userId,
+      subjectType: "ticket",
+      subjectId: seat.id,
+      payload: { eventId: event.id, userId, eventTitle: event.title, duoClaim: true },
+    });
+
+    return ok({
+      ticketId: seat.id,
+      address: event.locationAddress,
+      message: `Welcome to plot! You're in at ${event.title}. Address: ${event.locationAddress ?? "see event page"}.`,
+    });
+  },
+});
+
+export const checkInGuest = defineTool({
+  name: "check_in_guest",
+  description:
+    "Check a guest in at the door (host can check in anyone; guests can self check-in once the event starts). Releases their refundable deposit if one was held and unlocks their One Shot.",
+  inputSchema: z.object({ ticketId: z.string() }),
+  agentCallable: true,
+  execute: async (ctx, input) => {
+    const userId = requireUser(ctx);
+    const [ticket] = await db
+      .select()
+      .from(tables.tickets)
+      .where(eq(tables.tickets.id, input.ticketId));
+    if (!ticket) return err("Ticket not found.");
+    const event = await getEventOrThrow(ticket.eventId);
+
+    const isHost = event.hostId === userId;
+    if (!isHost && ticket.userId !== userId)
+      throw new ToolError("You can only check in yourself (hosts can check in anyone).");
+    if (!isHost && event.startsAt > new Date())
+      return err("Self check-in opens when the night starts.");
+    if (ticket.status !== "paid") return err("Only confirmed guests can check in.");
+    if (ticket.checkedInAt) return err("Already checked in.");
+
+    const releasingDeposit = ticket.depositStatus === "held";
+    await db
+      .update(tables.tickets)
+      .set({
+        checkedInAt: new Date(),
+        ...(releasingDeposit ? { depositStatus: "released" as const } : {}),
+      })
+      .where(eq(tables.tickets.id, ticket.id));
+
+    await emitDomainEvent({
+      type: "ticket.checked_in",
+      actorId: userId,
+      subjectType: "ticket",
+      subjectId: ticket.id,
+      payload: { eventId: event.id, userId: ticket.userId, depositReleased: releasingDeposit },
+    });
+
+    return ok({
+      checkedIn: true,
+      depositReleased: releasingDeposit,
+      message: releasingDeposit
+        ? "Checked in — the deposit hold is released. One Shot unlocked. 📸"
+        : "Checked in. One Shot unlocked. 📸",
+    });
+  },
+});
 
 export const confirmPayment = defineTool({
   name: "confirm_payment",
@@ -318,6 +549,12 @@ export const getEventRoster = defineTool({
           ticketId: r.ticket.id,
           name: r.guest.name ?? r.guest.email,
           answers: r.ticket.answers,
+          kind: r.ticket.kind,
+          team: r.ticket.team,
+          bibNumber: r.ticket.bibNumber,
+          checkedIn: !!r.ticket.checkedInAt,
+          deposit: r.ticket.depositStatus,
+          unclaimedDuoSeat: r.ticket.kind === "duo_guest" && !!r.ticket.claimCode,
           bookedAt: r.ticket.createdAt?.toISOString(),
         }));
 
@@ -330,7 +567,11 @@ export const getEventRoster = defineTool({
       confirmed: paid,
       pendingPayment: byStatus("pending"),
       waitlist: byStatus("waitlisted"),
-      revenue: formatPrice(paid.length * event.priceCents),
+      revenue: formatPrice(
+        rows
+          .filter((r) => r.ticket.status === "paid")
+          .reduce((sum, r) => sum + effectivePriceCents(event, r.ticket.kind), 0),
+      ),
     });
   },
 });

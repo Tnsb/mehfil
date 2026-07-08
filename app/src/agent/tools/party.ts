@@ -45,6 +45,7 @@ export const getPartyChat = defineTool({
         author: msg.kind === "cohost" ? `${vibe.emoji} ${vibe.name}` : (author?.name ?? "Guest"),
         isSelf: msg.userId === userId,
         body: msg.body,
+        ...(msg.imageDataUrl ? { imageDataUrl: msg.imageDataUrl } : {}),
         at: msg.createdAt?.toISOString(),
       })),
     });
@@ -58,6 +59,10 @@ export const postPartyMessage = defineTool({
   inputSchema: z.object({
     eventId: z.string(),
     body: z.string().min(1).max(1000),
+    imageDataUrl: z
+      .string()
+      .optional()
+      .describe("Optional attached photo as a data URL (used by Lost & Found posts)"),
   }),
   agentCallable: true,
   execute: async (ctx, input) => {
@@ -66,12 +71,16 @@ export const postPartyMessage = defineTool({
     if (!(await hasPartyAccess(userId, event)))
       throw new ToolError("The party chat is for confirmed guests only.");
 
+    if (input.imageDataUrl && !input.imageDataUrl.startsWith("data:image/"))
+      throw new ToolError("imageDataUrl must be an image data URL.");
+
     await db.insert(tables.messages).values({
       id: newId("msg"),
       eventId: event.id,
       userId,
       kind: "chat",
       body: input.body,
+      imageDataUrl: input.imageDataUrl ?? null,
     });
 
     await emitDomainEvent({

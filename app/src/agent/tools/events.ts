@@ -6,13 +6,23 @@ import { db, tables } from "@/db";
 import { and, desc, eq } from "drizzle-orm";
 import { newId } from "@/lib/ids";
 import { emitDomainEvent } from "@/events/bus";
+import { THEMES, THEME_KEYS, DEFAULT_THEME } from "@/themes";
 import { defineTool, ok, err, requireUser, ToolError } from "../types";
 import { eventView, seatsTaken, getEventOrThrow } from "./helpers";
+
+/** Next episode number within a show. */
+async function nextEpisodeNumber(showId: string): Promise<number> {
+  const rows = await db
+    .select({ id: tables.events.id })
+    .from(tables.events)
+    .where(eq(tables.events.showId, showId));
+  return rows.length + 1;
+}
 
 export const createEvent = defineTool({
   name: "create_event",
   description:
-    "Create a draft event from the host's description. Use this when the host describes a dinner or event they want to run (e.g. 'six-course Oaxacan dinner at my place Saturday, 10 seats, $85'). The event starts as a draft — it is not visible to guests until published with publish_event. Dates must be in the future.",
+    `Create a draft event (an "episode") from the host's description — e.g. 'six-course Oaxacan dinner at my place Saturday, 10 seats, $85'. Options: theme (${THEME_KEYS.join(", ")}) which re-renders the whole night (palette, One Shot film stock, superlatives, icebreakers); template "run_club" for runs (adds waivers + bib numbers, defaults theme to finish_line); depositDollars for a refundable no-flake hold on free events; mysterySeat (one blind seat, 20% off); duoTickets (two seats 10% off, +1 must be new to plot); twistIntensity for a Cohost mid-event surprise (chill/spicy/chaos); showTitle to file it under a recurring show/series. Drafts are invisible until publish_event.`,
   inputSchema: z.object({
     title: z.string().min(3).describe("Short, appetizing event title"),
     vibe: z
@@ -31,12 +41,46 @@ export const createEvent = defineTool({
       .string()
       .optional()
       .describe("The real address, revealed only to paid guests"),
+    theme: z.enum(THEME_KEYS as [string, ...string[]]).optional(),
+    template: z.enum(["dinner", "run_club"]).default("dinner"),
+    depositDollars: z.number().min(0).optional().describe("Refundable hold for free events"),
+    mysterySeat: z.boolean().optional(),
+    duoTickets: z.boolean().optional(),
+    twistIntensity: z.enum(["off", "chill", "spicy", "chaos"]).optional(),
+    showTitle: z
+      .string()
+      .optional()
+      .describe("Name of the recurring show/series this belongs to (created if new), e.g. 'Maya's Table'"),
   }),
   agentCallable: true,
   execute: async (ctx, input) => {
     const userId = requireUser(ctx);
     const startsAt = new Date(input.startsAtIso);
     if (isNaN(startsAt.getTime())) return err("Could not parse the start date.");
+
+    // resolve the show (crews & series are first-class)
+    let showId: string | null = null;
+    let season: number | null = null;
+    let episodeNumber: number | null = null;
+    if (input.showTitle) {
+      const [existingShow] = await db
+        .select()
+        .from(tables.shows)
+        .where(and(eq(tables.shows.hostId, userId), eq(tables.shows.title, input.showTitle)));
+      const show =
+        existingShow ??
+        (
+          await db
+            .insert(tables.shows)
+            .values({ id: newId("shw"), hostId: userId, title: input.showTitle })
+            .returning()
+        )[0];
+      showId = show.id;
+      season = show.currentSeason;
+      episodeNumber = await nextEpisodeNumber(show.id);
+    }
+
+    const theme = input.theme ?? (input.template === "run_club" ? "finish_line" : DEFAULT_THEME);
 
     const id = newId("evt");
     const [event] = await db
@@ -45,14 +89,23 @@ export const createEvent = defineTool({
         id,
         hostId: userId,
         title: input.title,
-        vibe: input.vibe,
+        vibe: input.vibe ?? THEMES[theme].tagline,
         description: input.description,
+        template: input.template,
         priceCents: Math.round(input.priceDollars * 100),
         capacity: input.capacity,
         startsAt,
         locationHint: input.locationHint,
         locationAddress: input.locationAddress,
         questions: [{ key: "dietary", label: "Any dietary restrictions or allergies?" }],
+        theme,
+        depositCents: Math.round((input.depositDollars ?? 0) * 100),
+        mysterySeat: input.mysterySeat ?? false,
+        duoTickets: input.duoTickets ?? false,
+        twistIntensity: input.twistIntensity ?? "off",
+        showId,
+        season,
+        episodeNumber,
       })
       .returning();
 
@@ -86,6 +139,12 @@ export const updateEvent = defineTool({
     startsAtIso: z.string().optional(),
     locationHint: z.string().optional(),
     locationAddress: z.string().optional(),
+    theme: z.enum(THEME_KEYS as [string, ...string[]]).optional(),
+    depositDollars: z.number().min(0).optional(),
+    mysterySeat: z.boolean().optional(),
+    duoTickets: z.boolean().optional(),
+    twistIntensity: z.enum(["off", "chill", "spicy", "chaos"]).optional(),
+    moderateOverheard: z.boolean().optional(),
   }),
   agentCallable: true,
   execute: async (ctx, input) => {
@@ -103,6 +162,12 @@ export const updateEvent = defineTool({
     if (input.capacity !== undefined) patch.capacity = input.capacity;
     if (input.locationHint !== undefined) patch.locationHint = input.locationHint;
     if (input.locationAddress !== undefined) patch.locationAddress = input.locationAddress;
+    if (input.theme !== undefined) patch.theme = input.theme;
+    if (input.depositDollars !== undefined) patch.depositCents = Math.round(input.depositDollars * 100);
+    if (input.mysterySeat !== undefined) patch.mysterySeat = input.mysterySeat;
+    if (input.duoTickets !== undefined) patch.duoTickets = input.duoTickets;
+    if (input.twistIntensity !== undefined) patch.twistIntensity = input.twistIntensity;
+    if (input.moderateOverheard !== undefined) patch.moderateOverheard = input.moderateOverheard;
     if (input.startsAtIso !== undefined) {
       const d = new Date(input.startsAtIso);
       if (isNaN(d.getTime())) return err("Could not parse the start date.");
@@ -131,7 +196,7 @@ export const updateEvent = defineTool({
 export const publishEvent = defineTool({
   name: "publish_event",
   description:
-    "Publish a draft event so guests can book. The host MUST explicitly accept the hosting terms (they warrant they are legally allowed to run this event — TABLE surfaces compliance info but never gives legal verdicts). Ask the host to confirm acceptance before calling this with acceptTerms=true.",
+    "Publish a draft event so guests can book. The host MUST explicitly accept the hosting terms (they warrant they are legally allowed to run this event — plot surfaces compliance info but never gives legal verdicts). Ask the host to confirm acceptance before calling this with acceptTerms=true.",
   inputSchema: z.object({
     eventId: z.string(),
     acceptTerms: z
@@ -147,9 +212,13 @@ export const publishEvent = defineTool({
       return err("The host must accept the hosting terms before publishing.");
     if (event.status !== "draft") return err(`Event is already ${event.status}.`);
 
+    // drop mechanics: sequels open to past guests first, everyone else 6h later
+    const isSequel = !!event.parentEventId || (!!event.showId && (event.episodeNumber ?? 1) > 1);
+    const publicAt = isSequel ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null;
+
     const [updated] = await db
       .update(tables.events)
-      .set({ status: "published", tosAcceptedAt: new Date() })
+      .set({ status: "published", tosAcceptedAt: new Date(), publicAt })
       .where(eq(tables.events.id, event.id))
       .returning();
 
@@ -164,7 +233,9 @@ export const publishEvent = defineTool({
     return ok({
       event: eventView(updated, { includeAddress: true, seatsLeft: await seatsLeft(updated.id, updated.capacity) }),
       shareUrl: `/e/${event.id}`,
-      message: "Live! Share the event link — the address stays hidden until a guest pays.",
+      message: publicAt
+        ? `Live! Past guests get first access for 6 hours (until ${publicAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}), then the link goes wide.`
+        : "Live! Share the event link — the address stays hidden until a guest pays.",
     });
   },
 });
@@ -228,6 +299,24 @@ export const runItBack = defineTool({
       while (startsAt <= new Date()) startsAt.setDate(startsAt.getDate() + 7);
     }
 
+    // running it back makes it a series: attach to the original's show, or start one
+    let showId = original.showId;
+    let season = original.season;
+    if (!showId) {
+      const [show] = await db
+        .insert(tables.shows)
+        .values({ id: newId("shw"), hostId: userId, title: original.title })
+        .returning();
+      showId = show.id;
+      season = show.currentSeason;
+      // retro-file the original as episode 1
+      await db
+        .update(tables.events)
+        .set({ showId, season, episodeNumber: 1 })
+        .where(eq(tables.events.id, original.id));
+    }
+    const episodeNumber = await nextEpisodeNumber(showId);
+
     const id = newId("evt");
     const [clone] = await db
       .insert(tables.events)
@@ -247,6 +336,15 @@ export const runItBack = defineTool({
         questions: original.questions,
         cohostVibe: original.cohostVibe,
         parentEventId: original.id,
+        theme: original.theme,
+        depositCents: original.depositCents,
+        mysterySeat: original.mysterySeat,
+        duoTickets: original.duoTickets,
+        twistIntensity: original.twistIntensity,
+        moderateOverheard: original.moderateOverheard,
+        showId,
+        season,
+        episodeNumber,
       })
       .returning();
 

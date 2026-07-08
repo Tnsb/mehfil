@@ -8,6 +8,7 @@ import { db, tables } from "@/db";
 import { and, eq } from "drizzle-orm";
 import { newId } from "@/lib/ids";
 import { emitDomainEvent } from "@/events/bus";
+import { generateTitleCard } from "@/cohost/titlecard";
 import { defineTool, ok, err, requireUser, ToolError } from "../types";
 import { getEventOrThrow } from "./helpers";
 
@@ -29,10 +30,23 @@ export const runAfterparty = defineTool({
     if (event.startsAt > new Date())
       return err("This event hasn't happened yet. The AfterParty fires after the night.");
 
+    // no-shows forfeit their deposit hold
+    if (event.depositCents > 0) {
+      await db
+        .update(tables.tickets)
+        .set({ depositStatus: "forfeited" })
+        .where(
+          and(eq(tables.tickets.eventId, event.id), eq(tables.tickets.depositStatus, "held")),
+        );
+    }
+
+    // the Cohost names the episode from what actually happened
+    const titleCard = await generateTitleCard(event);
+
     // completedAt anchors the 48h Taps window (opens now, with the reveal)
     await db
       .update(tables.events)
-      .set({ status: "completed", completedAt: new Date() })
+      .set({ status: "completed", completedAt: new Date(), titleCard })
       .where(eq(tables.events.id, event.id));
 
     // the notifications module reacts to this and messages every attendee
@@ -41,7 +55,7 @@ export const runAfterparty = defineTool({
       actorId: ctx.userId,
       subjectType: "event",
       subjectId: event.id,
-      payload: { title: event.title },
+      payload: { title: event.title, titleCard },
     });
 
     const attendees = await db

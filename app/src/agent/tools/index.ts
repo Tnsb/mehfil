@@ -19,7 +19,18 @@ import {
   cancelTicket,
   getMyTickets,
   getEventRoster,
+  claimDuoSeat,
+  checkInGuest,
 } from "./tickets";
+import { submitOverheard, getOverheard, moderateOverheard } from "./overheard";
+import { addTabItem, getTab, requestTabPayments } from "./tab";
+import {
+  voteSuperlative,
+  getSuperlativeResults,
+  triggerPlotTwist,
+  getHostPlaylist,
+} from "./night";
+import { getShow, closeSeason, getMyProfile, setProfile } from "./shows";
 import { runAfterparty, submitFeedback, getAfterpartySummary } from "./afterparty";
 import { getMyActivity, discoverEvents } from "./activity";
 import { getPartyChat, postPartyMessage, setCohostVibe } from "./party";
@@ -46,10 +57,28 @@ export const allTools: AnyTool[] = [
   cancelTicket,
   getMyTickets,
   getEventRoster,
+  claimDuoSeat,
+  checkInGuest,
   // party chat + cohost
   getPartyChat,
   postPartyMessage,
   setCohostVibe,
+  // during the night
+  submitOverheard,
+  getOverheard,
+  moderateOverheard,
+  addTabItem,
+  getTab,
+  requestTabPayments,
+  voteSuperlative,
+  getSuperlativeResults,
+  triggerPlotTwist,
+  getHostPlaylist,
+  // shows, seasons, profile
+  getShow,
+  closeSeason,
+  getMyProfile,
+  setProfile,
   // one shot
   takeOneShot,
   getPhotoRoll,

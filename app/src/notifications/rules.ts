@@ -75,28 +75,58 @@ subscribe(async (e) => {
       return;
     }
 
-    /* A run-it-back sequel went live: past guests get first access. */
+    /* A sequel went live: everyone from the show's past episodes gets first access. */
     case "event.published": {
       const event = await getEvent(e.subjectId);
-      if (!event?.parentEventId) return;
+      if (!event) return;
+      const priorEventIds: string[] = [];
+      if (event.parentEventId) priorEventIds.push(event.parentEventId);
+      if (event.showId) {
+        const siblings = await db
+          .select({ id: tables.events.id })
+          .from(tables.events)
+          .where(eq(tables.events.showId, event.showId));
+        priorEventIds.push(...siblings.map((s) => s.id).filter((id) => id !== event.id));
+      }
+      if (priorEventIds.length === 0) return;
       const pastGuests = await db
         .select({ userId: tables.tickets.userId })
         .from(tables.tickets)
         .where(
           and(
-            eq(tables.tickets.eventId, event.parentEventId),
+            inArray(tables.tickets.eventId, priorEventIds),
             eq(tables.tickets.status, "paid"),
           ),
         );
+      const ep = event.episodeNumber ? `S${event.season ?? 1}E${event.episodeNumber} — ` : "";
       for (const g of new Set(pastGuests.map((r) => r.userId))) {
         await notify({
           userId: g,
           templateKey: "runback.first_access",
-          title: `They're running it back: ${event.title}`,
-          body: `You were there last time — you get first access before the link goes wide.`,
+          title: `New episode: ${ep}${event.title}`,
+          body: event.publicAt
+            ? `You were there last time — first access is yours until ${event.publicAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, then the link goes wide.`
+            : `You were there last time — you get first access before the link goes wide.`,
           href: `/e/${event.id}`,
         });
       }
+      return;
+    }
+
+    /* A guest checked in at the door — deposit released. */
+    case "ticket.checked_in": {
+      const guestId = e.payload?.userId as string;
+      const eventId = e.payload?.eventId as string;
+      if (!e.payload?.depositReleased) return;
+      const event = await getEvent(eventId);
+      if (!event || !guestId) return;
+      await notify({
+        userId: guestId,
+        templateKey: "deposit.released",
+        title: `Deposit released ✓ ${event.title}`,
+        body: `You showed up, the hold is gone. Enjoy the night.`,
+        href: `/party/${event.id}`,
+      });
       return;
     }
 
@@ -158,10 +188,11 @@ subscribe(async (e) => {
       return;
     }
 
-    /* AfterParty fired: the roll develops, superlatives drop, feedback is asked. */
+    /* AfterParty fired: the Reveal — title card, roll, awards, Taps, feedback. */
     case "afterparty.fired": {
       const event = await getEvent(e.subjectId);
       if (!event) return;
+      const titleCard = (e.payload?.titleCard as string) ?? event.titleCard;
       const attendees = await db
         .select({ ticket: tables.tickets, guest: tables.users })
         .from(tables.tickets)
@@ -172,28 +203,39 @@ subscribe(async (e) => {
         await notify({
           userId: guest.id,
           templateKey: "afterparty.drop",
-          title: `The roll developed ✨ ${event.title}`,
-          body: `Your One Shot reveal, last night's awards — and Taps are open for the next 48 hours. It's all in the Drop.`,
+          title: titleCard ? `Last night has a name: "${titleCard}"` : `The roll developed ✨ ${event.title}`,
+          body: `Your One Shot reveal, the awards, Overheard cards — and Taps are open for 48 hours. It's all in the Reveal.`,
           href: `/drop/${event.id}`,
         });
       }
       await notify({
         userId: event.hostId,
         templateKey: "afterparty.drop",
-        title: `The Drop is live: ${event.title}`,
+        title: `The Reveal is live: ${event.title}`,
         body: `Photos developed and feedback is rolling in. One tap to run it back.`,
         href: `/drop/${event.id}`,
       });
 
-      // the Cohost hands out end-of-night superlatives in the chat
+      // the Cohost crowns superlatives: real votes first, improvised when the ballots are empty
       if (attendees.length > 0) {
         const vibe = VIBES[event.cohostVibe];
-        const shuffled = [...attendees].sort(
-          (a, b) => a.ticket.id.localeCompare(b.ticket.id),
-        );
-        const lines = SUPERLATIVES.slice(0, Math.min(attendees.length, 4)).map(
-          (award, i) => `${award}: ${shuffled[i % shuffled.length].guest.name ?? "a legend"}`,
-        );
+        const { tallySuperlatives } = await import("@/agent/tools/night");
+        const results = await tallySuperlatives(event.id);
+        let lines: string[];
+        if (results.length > 0) {
+          lines = results.map(
+            (r) => `${r.category}: ${r.winnerName} (${r.votes} vote${r.votes === 1 ? "" : "s"})`,
+          );
+        } else {
+          const { getTheme } = await import("@/themes");
+          const cats = getTheme(event.theme).superlatives.length
+            ? getTheme(event.theme).superlatives
+            : SUPERLATIVES;
+          const shuffled = [...attendees].sort((a, b) => a.ticket.id.localeCompare(b.ticket.id));
+          lines = cats
+            .slice(0, Math.min(attendees.length, 4))
+            .map((award, i) => `${award}: ${shuffled[i % shuffled.length].guest.name ?? "a legend"}`);
+        }
         await postCohostMessage(event.id, vibe.superlatives(lines));
       }
       return;

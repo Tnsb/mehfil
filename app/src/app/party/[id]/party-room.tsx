@@ -13,8 +13,19 @@ type ChatMessage = {
   author: string;
   isSelf: boolean;
   body: string;
+  imageDataUrl?: string;
   at?: string;
 };
+
+async function downscale(file: File, maxDim = 700): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.75);
+}
 
 export function PartyRoom({
   eventId,
@@ -30,6 +41,7 @@ export function PartyRoom({
   const [error, setError] = useState<string | undefined>();
   const [pending, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lostFoundRef = useRef<HTMLInputElement>(null);
   const countRef = useRef(initialMessages.length);
 
   async function refresh() {
@@ -96,6 +108,14 @@ export function PartyRoom({
                   {m.author}
                 </p>
               ) : null}
+              {m.imageDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={m.imageDataUrl}
+                  alt="shared in chat"
+                  className="rounded-xl mb-1.5 max-h-48 w-auto"
+                />
+              ) : null}
               <p className="text-sm whitespace-pre-line leading-relaxed">{m.body}</p>
             </div>
           </div>
@@ -114,6 +134,42 @@ export function PartyRoom({
             send();
           }}
         >
+          <input
+            ref={lostFoundRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              startTransition(async () => {
+                setError(undefined);
+                try {
+                  const imageDataUrl = await downscale(file);
+                  const res = await toolAction("post_party_message", {
+                    eventId,
+                    body: input.trim() || "🧣 Lost & Found — someone left this. Claim it!",
+                    imageDataUrl,
+                  });
+                  if (!res.ok) return setError(res.error);
+                  setInput("");
+                  await refresh();
+                } catch {
+                  setError("Couldn't read that photo.");
+                }
+              });
+            }}
+          />
+          <button
+            type="button"
+            title="Lost & Found — snap what someone left behind"
+            className="btn btn-ghost !px-3 !py-2"
+            disabled={pending}
+            onClick={() => lostFoundRef.current?.click()}
+          >
+            🧣
+          </button>
           <input
             className="field !py-2 !rounded-full"
             placeholder="what's the address again?"

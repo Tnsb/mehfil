@@ -21,6 +21,12 @@ export const users = sqliteTable("users", {
   id: id(),
   email: text("email").notNull().unique(),
   name: text("name"),
+  /** Instagram handle — used by the wingman's auto-exchange on tap matches */
+  igHandle: text("ig_handle"),
+  /** opt-in: share my IG handle automatically when a Tap matches */
+  shareHandleOnMatch: integer("share_handle_on_match", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: createdAt(),
 });
 
@@ -42,6 +48,24 @@ export const sessions = sqliteTable("sessions", {
   createdAt: createdAt(),
 });
 
+/* ---------------- shows (crews & series — "every event is an episode") --- */
+
+export const shows = sqliteTable(
+  "shows",
+  {
+    id: id(),
+    hostId: text("host_id")
+      .notNull()
+      .references(() => users.id),
+    title: text("title").notNull(),
+    emoji: text("emoji").notNull().default("🎬"),
+    /** seasons close at natural boundaries or when the host calls it */
+    currentSeason: integer("current_season").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [index("shows_host_idx").on(t.hostId)],
+);
+
 /* ---------------- events (the generic event object) ---------------- */
 
 export type EventQuestion = { key: string; label: string };
@@ -52,6 +76,7 @@ export type EventStatus =
   | "completed"
   | "cancelled";
 export type CohostVibe = "chaotic_bestie" | "formal_butler" | "hype_man";
+export type TwistIntensity = "off" | "chill" | "spicy" | "chaos";
 
 export const events = sqliteTable(
   "events",
@@ -89,6 +114,28 @@ export const events = sqliteTable(
     parentEventId: text("parent_event_id"),
     /** when the AfterParty fired — anchors the 48h Taps window */
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    /* -------- episodes & seasons -------- */
+    /** the show this episode belongs to (null = a one-off "special") */
+    showId: text("show_id"),
+    season: integer("season"),
+    episodeNumber: integer("episode_number"),
+    /** the Cohost-written episode title, e.g. "The Pineapple Incident" — set at the Reveal */
+    titleCard: text("title_card"),
+    /* -------- theme + night mechanics -------- */
+    /** theme pack key (see src/themes) — drives palette, film stock, superlatives, icebreakers */
+    theme: text("theme").notNull().default("classic"),
+    /** the Cohost injects one mid-event surprise at this intensity */
+    twistIntensity: text("twist_intensity").$type<TwistIntensity>().notNull().default("off"),
+    /** refundable hold that kills flaking — released at check-in (0 = none) */
+    depositCents: integer("deposit_cents").notNull().default(0),
+    /** one blind discounted seat, host opt-in */
+    mysterySeat: integer("mystery_seat", { mode: "boolean" }).notNull().default(false),
+    /** duo tickets: two seats, small discount, +1 must be new to plot */
+    duoTickets: integer("duo_tickets", { mode: "boolean" }).notNull().default(false),
+    /** host toggle: Overheard quotes need approval before featuring */
+    moderateOverheard: integer("moderate_overheard", { mode: "boolean" }).notNull().default(false),
+    /** drop mechanics: before this instant only past guests of the show can book */
+    publicAt: integer("public_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),
   },
   (t) => [index("events_host_idx").on(t.hostId), index("events_status_idx").on(t.status)],
@@ -97,6 +144,8 @@ export const events = sqliteTable(
 /* ---------------- tickets ---------------- */
 
 export type TicketStatus = "pending" | "paid" | "waitlisted" | "cancelled";
+export type TicketKind = "standard" | "mystery" | "duo_lead" | "duo_guest";
+export type DepositStatus = "held" | "released" | "forfeited";
 
 /** personalized invite persona ("their tarot card") assigned at booking */
 export type TicketPersona = { card: string; emoji: string; line: string };
@@ -120,6 +169,24 @@ export const tickets = sqliteTable(
     persona: text("persona", { mode: "json" }).$type<TicketPersona>(),
     /** what the Cohost assigned this guest to bring */
     bringItem: text("bring_item"),
+    /** standard / mystery (blind, discounted) / duo_lead / duo_guest */
+    kind: text("kind").$type<TicketKind>().notNull().default("standard"),
+    /** duo_guest only: share code the +1 claims with (null once claimed) */
+    claimCode: text("claim_code"),
+    /** vibe check: one-tap quiz answers keyed by question id */
+    vibeAnswers: text("vibe_answers", { mode: "json" }).$type<Record<string, string>>(),
+    /** team derived from the vibe check (seating/games signal) */
+    team: text("team"),
+    /** deposit lifecycle (only when event.depositCents > 0) */
+    depositStatus: text("deposit_status").$type<DepositStatus>(),
+    /** door check-in: releases the deposit, unlocks the One Shot */
+    checkedInAt: integer("checked_in_at", { mode: "timestamp_ms" }),
+    /** waiver acceptance (physical events, e.g. run clubs) */
+    waiverAcceptedAt: integer("waiver_accepted_at", { mode: "timestamp_ms" }),
+    /** bib number for run-club episodes */
+    bibNumber: integer("bib_number"),
+    /** who referred this guest (their personal link) */
+    referredBy: text("referred_by"),
     paidAt: integer("paid_at", { mode: "timestamp_ms" }),
     createdAt: createdAt(),
   },
@@ -169,9 +236,72 @@ export const messages = sqliteTable(
     userId: text("user_id"),
     kind: text("kind").$type<MessageKind>().notNull().default("chat"),
     body: text("body").notNull(),
+    /** optional attached image (Lost & Found posts) */
+    imageDataUrl: text("image_data_url"),
     createdAt: createdAt(),
   },
   (t) => [index("messages_event_idx").on(t.eventId, t.thread)],
+);
+
+/* ---------------- Overheard (anonymous quotes → typographic cards) -------- */
+
+export type OverheardStatus = "pending" | "featured" | "hidden";
+
+export const overheard = sqliteTable(
+  "overheard",
+  {
+    id: id(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    /** kept for moderation/abuse only — NEVER displayed */
+    submitterId: text("submitter_id").notNull(),
+    quote: text("quote").notNull(),
+    status: text("status").$type<OverheardStatus>().notNull().default("featured"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("overheard_event_idx").on(t.eventId)],
+);
+
+/* ---------------- The Tab (costs → splits → payment requests) ------------- */
+
+export const tabItems = sqliteTable(
+  "tab_items",
+  {
+    id: id(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    /** who paid for it */
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    label: text("label").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("tab_items_event_idx").on(t.eventId)],
+);
+
+/* ---------------- superlative votes (voted during, revealed after) -------- */
+
+export const superlativeVotes = sqliteTable(
+  "superlative_votes",
+  {
+    id: id(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    voterId: text("voter_id")
+      .notNull()
+      .references(() => users.id),
+    category: text("category").notNull(),
+    votedForUserId: text("voted_for_user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("superlative_votes_event_idx").on(t.eventId)],
 );
 
 /* ---------------- One Shot (one photo per guest, sealed until morning) ---- */
@@ -280,7 +410,11 @@ export const notifications = sqliteTable(
 );
 
 export type User = typeof users.$inferSelect;
+export type Show = typeof shows.$inferSelect;
 export type Event = typeof events.$inferSelect;
+export type Overheard = typeof overheard.$inferSelect;
+export type TabItem = typeof tabItems.$inferSelect;
+export type SuperlativeVote = typeof superlativeVotes.$inferSelect;
 export type Ticket = typeof tickets.$inferSelect;
 export type Feedback = typeof feedback.$inferSelect;
 export type DomainEvent = typeof domainEvents.$inferSelect;

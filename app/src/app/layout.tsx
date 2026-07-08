@@ -14,9 +14,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TABLE — AI agents that run your paid dinner",
+  title: "plot — main character energy, as a service",
   description:
-    "One sentence in → a legal, hyped, sold-out, self-following-up dinner out.",
+    "The AI Cohost that turns your nights into episodes: themed parties, One Shot film rolls, morning-after Reveals, and the crew that keeps showing up.",
 };
 
 export const viewport: Viewport = {

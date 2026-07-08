@@ -1,6 +1,7 @@
 /**
- * The AfterParty Drop — the morning-after page:
- * One Shot reveal, Wrapped-style card, Taps (48h window, three intents),
+ * The Reveal — the morning-after page:
+ * episode title card, One Shot roll (developing), Overheard cards, superlative
+ * winners, the Tab, Wrapped card, Taps (48h window, three intents),
  * feedback CTA, and one-tap "run it back" for the host.
  */
 import Link from "next/link";
@@ -8,11 +9,16 @@ import { notFound, redirect } from "next/navigation";
 import { and, eq, or } from "drizzle-orm";
 import { db, tables } from "@/db";
 import { Shell } from "@/components/shell";
+import { StoryExportButton } from "@/components/story-export";
 import { getCurrentUser } from "@/lib/auth";
 import { hasPartyAccess } from "@/agent/tools/helpers";
+import { computeTab } from "@/agent/tools/tab";
+import { tallySuperlatives } from "@/agent/tools/night";
 import { formatDate } from "@/lib/format";
 import { TAP_INTENTS, tapWindow, hoursLeft } from "@/lib/taps";
+import { getTheme } from "@/themes";
 import { TapButtons, RunItBackButton } from "./drop-actions";
+import { TabCard } from "./tab-card";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +34,15 @@ export default async function DropPage({ params }: { params: Promise<{ id: strin
 
   const isHost = event.hostId === user.id;
   const [host] = await db.select().from(tables.users).where(eq(tables.users.id, event.hostId));
+  const theme = getTheme(event.theme);
+
+  /* overheard cards + award winners + the tab */
+  const quotes = await db
+    .select()
+    .from(tables.overheard)
+    .where(and(eq(tables.overheard.eventId, event.id), eq(tables.overheard.status, "featured")));
+  const awards = await tallySuperlatives(event.id);
+  const tab = await computeTab(event.id, event.hostId);
 
   /* the developed roll */
   const roll = await db
@@ -108,15 +123,38 @@ export default async function DropPage({ params }: { params: Promise<{ id: strin
 
   return (
     <Shell>
-      <div className="hero-gradient-animated text-white">
+      <div
+        className="text-white"
+        style={{
+          background: `linear-gradient(135deg, ${theme.palette.from}, ${theme.palette.to} 70%, ${theme.palette.accent})`,
+        }}
+      >
         <div className="mx-auto max-w-2xl px-4 py-8">
-          <p className="pill bg-white/20 backdrop-blur-sm text-white mb-3">✨ The AfterParty Drop</p>
-          <h1 className="font-display text-3xl md:text-4xl font-semibold [text-wrap:balance]">
-            {event.title}
-          </h1>
+          <p className="pill bg-white/20 backdrop-blur-sm text-white mb-3">✨ The Reveal</p>
+          {event.titleCard ? (
+            <>
+              <p className="text-white/80 text-sm font-semibold uppercase tracking-widest">
+                {event.episodeNumber ? `S${event.season ?? 1}E${event.episodeNumber} · ` : ""}
+                {event.title}
+              </p>
+              <h1 className="font-display text-3xl md:text-4xl font-semibold [text-wrap:balance] mt-1 slide-in">
+                &ldquo;{event.titleCard}&rdquo;
+              </h1>
+            </>
+          ) : (
+            <h1 className="font-display text-3xl md:text-4xl font-semibold [text-wrap:balance]">
+              {event.title}
+            </h1>
+          )}
           <p className="text-white/90 mt-1">
             {formatDate(event.startsAt)} · the roll developed overnight
           </p>
+          <Link
+            href={`/recap/${event.id}`}
+            className="btn mt-4 bg-white/15 text-white backdrop-blur hover:bg-white/25"
+          >
+            ▶ Play the recap
+          </Link>
         </div>
       </div>
 
@@ -138,16 +176,74 @@ export default async function DropPage({ params }: { params: Promise<{ id: strin
                 >
                   {/* data-URL photos; swap for blob storage + next/image in prod */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={photo.dataUrl} alt={photo.caption ?? `One Shot by ${author.name}`} className="w-full aspect-square object-cover" />
-                  <figcaption className="px-3 py-2 text-xs">
-                    <span className="font-bold">{author.name ?? "Guest"}&apos;s one shot</span>
-                    {photo.caption ? <span className="text-[color:var(--color-ink-soft)]"> — {photo.caption}</span> : null}
+                  <img
+                    src={photo.dataUrl}
+                    alt={photo.caption ?? `One Shot by ${author.name}`}
+                    className="w-full aspect-square object-cover develop"
+                    style={{ animationDelay: `${i * 350}ms` }}
+                  />
+                  <figcaption className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                    <span>
+                      <span className="font-bold">{author.name ?? "Guest"}&apos;s one shot</span>
+                      {photo.caption ? <span className="text-[color:var(--color-ink-soft)]"> — {photo.caption}</span> : null}
+                    </span>
+                    {photo.userId === user.id ? (
+                      <StoryExportButton
+                        dataUrl={photo.dataUrl}
+                        eventTitle={event.title}
+                        titleCard={event.titleCard}
+                        dateLabel={formatDate(event.startsAt)}
+                        palette={theme.palette}
+                      />
+                    ) : null}
                   </figcaption>
                 </figure>
               ))}
             </div>
           )}
         </section>
+
+        {/* Overheard — anonymous typographic cards */}
+        {quotes.length > 0 ? (
+          <section>
+            <h2 className="font-display text-2xl font-semibold mb-3">🗣 Overheard</h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {quotes.map((q, i) => (
+                <blockquote
+                  key={q.id}
+                  className="card p-5 rise-in !bg-[color:var(--color-ink)] text-[color:var(--color-cream)]"
+                  style={{ animationDelay: `${i * 100}ms` }}
+                >
+                  <p className="font-display text-xl leading-snug">&ldquo;{q.quote}&rdquo;</p>
+                  <footer className="text-xs text-white/50 mt-3">— someone, at {event.title}</footer>
+                </blockquote>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {/* superlative winners */}
+        {awards.length > 0 ? (
+          <section className="card p-5">
+            <h2 className="font-display text-xl font-semibold mb-3">🏆 The awards</h2>
+            <ul className="space-y-2">
+              {awards.map((a) => (
+                <li key={a.category} className="flex items-center justify-between gap-2 text-sm">
+                  <span>{a.category}</span>
+                  <span className="font-bold">
+                    {a.winnerName}
+                    <span className="font-normal text-[color:var(--color-ink-faint)]">
+                      {" "}· {a.votes} vote{a.votes === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {/* the Tab */}
+        <TabCard eventId={event.id} initialTab={tab} isHost={isHost} myUserId={user.id} />
 
         {/* Wrapped card */}
         <section className="card p-6 !bg-[color:var(--color-ink)] text-[color:var(--color-cream)] overflow-hidden relative">

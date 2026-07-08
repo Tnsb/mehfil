@@ -191,3 +191,22 @@ body {
 }
 .typing-dot:nth-child(2) { animation-delay: 0.15s; }
 .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* the roll "developing": blurry & washed out → sharp, like film in fixer */
+@keyframes develop {
+  0% { filter: blur(14px) saturate(0.2) brightness(1.5); opacity: 0.4; }
+  60% { filter: blur(4px) saturate(0.7) brightness(1.15); opacity: 0.9; }
+  100% { filter: blur(0) saturate(1) brightness(1); opacity: 1; }
+}
+.develop {
+  animation: develop 2.2s ease-out both;
+}
+
+/* recap / finale story slides */
+@keyframes slide-in {
+  from { opacity: 0; transform: scale(1.04); }
+  to { opacity: 1; transform: scale(1); }
+}
+.slide-in {
+  animation: slide-in 700ms var(--ease-snappy) both;
+}

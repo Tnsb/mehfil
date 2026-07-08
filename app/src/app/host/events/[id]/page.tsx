@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, tables } from "@/db";
 import { Shell } from "@/components/shell";
 import { Cover } from "@/components/cover";
@@ -8,17 +8,32 @@ import { runTool } from "@/agent/registry";
 import { getCurrentUser } from "@/lib/auth";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { VIBE_OPTIONS } from "@/cohost/vibes";
+import { THEMES, getTheme } from "@/themes";
 import {
   PublishPanel,
   AddressForm,
   AfterpartyButton,
   RemoveGuestButton,
   CohostVibePicker,
+  ThemePicker,
+  NightMechanicsPanel,
+  HostCheckInButton,
+  ModerateQuoteButtons,
 } from "./panels";
 
 export const dynamic = "force-dynamic";
 
-type RosterGuest = { ticketId: string; name: string; answers: Record<string, string> };
+type RosterGuest = {
+  ticketId: string;
+  name: string;
+  answers: Record<string, string>;
+  kind?: string;
+  team?: string | null;
+  bibNumber?: number | null;
+  checkedIn?: boolean;
+  deposit?: string | null;
+  unclaimedDuoSeat?: boolean;
+};
 type Roster = {
   confirmed: RosterGuest[];
   pendingPayment: RosterGuest[];
@@ -52,13 +67,29 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
       ? await runTool("get_afterparty_summary", ctx, { eventId: id })
       : null;
   const summary = summaryRes?.ok ? (summaryRes.data as Summary) : null;
+  const theme = getTheme(event.theme);
+  const isLive = isPast && event.status !== "completed" && event.status !== "cancelled";
+
+  const pendingQuotes = event.moderateOverheard
+    ? await db
+        .select()
+        .from(tables.overheard)
+        .where(and(eq(tables.overheard.eventId, id), eq(tables.overheard.status, "pending")))
+    : [];
 
   return (
     <Shell>
       <div className="mx-auto max-w-2xl px-4 py-6 space-y-5">
-        <Cover seed={event.id} className="h-28 rounded-[var(--radius-card)]">
-          <div className="absolute bottom-3 left-4">
+        <Cover
+          seed={event.id}
+          theme={{ ...theme.palette, emoji: theme.emoji }}
+          className="h-28 rounded-[var(--radius-card)]"
+        >
+          <div className="absolute bottom-3 left-4 flex gap-2">
             <span className="pill bg-white/90 capitalize">{event.status.replace("_", " ")}</span>
+            {event.episodeNumber ? (
+              <span className="pill bg-white/90">S{event.season ?? 1}E{event.episodeNumber}</span>
+            ) : null}
           </div>
         </Cover>
 
@@ -77,7 +108,12 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
               </Link>
               {event.status === "completed" ? (
                 <Link href={`/drop/${event.id}`} className="text-sm font-semibold text-[color:var(--color-grape)] underline underline-offset-2">
-                  View the AfterParty Drop
+                  View the Reveal
+                </Link>
+              ) : null}
+              {event.showId ? (
+                <Link href={`/show/${event.showId}`} className="text-sm font-semibold text-[color:var(--color-grape)] underline underline-offset-2">
+                  Show archive
                 </Link>
               ) : null}
             </div>
@@ -93,6 +129,56 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
           </p>
           <CohostVibePicker eventId={event.id} current={event.cohostVibe} options={VIBE_OPTIONS} />
         </div>
+
+        {/* theme — re-renders the whole night */}
+        <div className="card p-5">
+          <h2 className="font-display text-xl font-semibold">Theme</h2>
+          <p className="text-sm text-[color:var(--color-ink-soft)] mt-1 mb-3">
+            A theme re-renders the night: palette, One Shot film stock ({theme.filmStock.name}),
+            superlatives, icebreakers, and a one-tap playlist ({theme.playlist.title}).
+          </p>
+          <ThemePicker
+            eventId={event.id}
+            current={event.theme}
+            options={Object.values(THEMES).map((t) => ({
+              key: t.key,
+              name: t.name,
+              emoji: t.emoji,
+              tagline: t.tagline,
+            }))}
+          />
+        </div>
+
+        {/* night mechanics */}
+        <div className="card p-5">
+          <h2 className="font-display text-xl font-semibold mb-3">Night mechanics</h2>
+          <NightMechanicsPanel
+            eventId={event.id}
+            twistIntensity={event.twistIntensity}
+            mysterySeat={event.mysterySeat}
+            duoTickets={event.duoTickets}
+            depositDollars={event.depositCents / 100}
+            moderateOverheard={event.moderateOverheard}
+            isFree={event.priceCents === 0}
+            isPaid={event.priceCents > 0}
+            isLive={isLive}
+          />
+        </div>
+
+        {/* Overheard moderation queue */}
+        {pendingQuotes.length > 0 ? (
+          <div className="card p-5 !bg-[color:var(--color-blush)]">
+            <h2 className="font-display text-xl font-semibold mb-2">🗣 Overheard — awaiting your call</h2>
+            <ul className="space-y-2">
+              {pendingQuotes.map((q) => (
+                <li key={q.id} className="flex items-center gap-2 text-sm">
+                  <span className="flex-1">&ldquo;{q.quote}&rdquo;</span>
+                  <ModerateQuoteButtons quoteId={q.id} eventId={event.id} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {/* status-driven action card */}
         {event.status === "draft" ? (
@@ -162,7 +248,13 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
 
             <Section title={`Confirmed (${roster.confirmed.length})`}>
               {roster.confirmed.map((g) => (
-                <GuestRow key={g.ticketId} guest={g} eventId={event.id} removable={event.status !== "completed"} />
+                <GuestRow
+                  key={g.ticketId}
+                  guest={g}
+                  eventId={event.id}
+                  removable={event.status !== "completed"}
+                  showCheckIn={isLive && !g.checkedIn && !g.unclaimedDuoSeat}
+                />
               ))}
               {roster.confirmed.length === 0 ? <Empty text="No confirmed guests yet — share the link." /> : null}
             </Section>
@@ -199,7 +291,7 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
               MEHKO permit
             </a>{" "}
             (up to 30 meals/day, 90/week, $100k/yr). One-day event liability insurance is available
-            from providers like Thimble. TABLE surfaces official info — it never determines your legality.
+            from providers like Thimble. plot surfaces official info — it never determines your legality.
           </p>
         </div>
       </div>
@@ -220,10 +312,12 @@ function GuestRow({
   guest,
   eventId,
   removable,
+  showCheckIn,
 }: {
   guest: RosterGuest;
   eventId: string;
   removable: boolean;
+  showCheckIn?: boolean;
 }) {
   return (
     <li className="flex items-center gap-2 text-sm py-1.5 border-b border-[color:var(--color-ink)]/6 last:border-0">
@@ -231,10 +325,28 @@ function GuestRow({
         {guest.name.charAt(0).toUpperCase()}
       </span>
       <span className="font-medium truncate">{guest.name}</span>
+      {guest.unclaimedDuoSeat ? (
+        <span className="pill bg-[color:var(--color-butter-soft)] !text-[11px]">👯 +1 unclaimed</span>
+      ) : null}
+      {guest.kind === "mystery" ? (
+        <span className="pill bg-[color:var(--color-grape-soft)] !text-[11px]">🎭 mystery</span>
+      ) : null}
+      {guest.checkedIn ? (
+        <span className="pill bg-[color:var(--color-mint-soft)] !text-[11px]">✓ in</span>
+      ) : guest.deposit === "held" ? (
+        <span className="pill bg-[color:var(--color-blush)] !text-[11px]">🤝 deposit held</span>
+      ) : null}
+      {guest.bibNumber ? (
+        <span className="pill bg-[color:var(--color-mint-soft)] !text-[11px]">#{String(guest.bibNumber).padStart(3, "0")}</span>
+      ) : null}
+      {guest.team ? (
+        <span className="pill bg-[color:var(--color-butter-soft)] !text-[11px]">{guest.team}</span>
+      ) : null}
       {guest.answers?.dietary ? (
         <span className="pill bg-[color:var(--color-mint-soft)] !text-[11px] truncate">{guest.answers.dietary}</span>
       ) : null}
       <span className="flex-1" />
+      {showCheckIn ? <HostCheckInButton ticketId={guest.ticketId} eventId={eventId} /> : null}
       {removable ? <RemoveGuestButton ticketId={guest.ticketId} eventId={eventId} /> : null}
     </li>
   );

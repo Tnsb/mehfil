@@ -30,6 +30,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     { href: "/", label: "Explore", icon: "✦" },
     { href: "/chat", label: "Crew", icon: "◈" },
     { href: "/host", label: "Hosting", icon: "♨" },
+    { href: "/me", label: "You", icon: "🎬" },
     { href: "/inbox", label: "Inbox", icon: "▤", badge: unread },
   ];
 
@@ -38,7 +39,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 backdrop-blur-md bg-[color:var(--color-cream)]/85 border-b border-[color:var(--color-ink)]/8">
         <div className="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between gap-3">
           <Link href="/" className="font-display text-2xl font-semibold tracking-tight">
-            TABLE<span className="text-[color:var(--color-tangerine)]">.</span>
+            plot<span className="text-[color:var(--color-tangerine)]">.</span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             {tabs.map((t) => (
@@ -79,7 +80,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
 
       {/* mobile bottom tabs */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[color:var(--color-card)]/95 backdrop-blur-md border-t border-[color:var(--color-ink)]/8 pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {tabs.map((t) => (
             <Link
               key={t.href}

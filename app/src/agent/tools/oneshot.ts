@@ -43,6 +43,9 @@ export const takeOneShot = defineTool({
     // hosts get a shot too — pegged to a synthetic host "ticket" id
     const ticketId = ticket?.id ?? (event.hostId === userId ? `host_${event.id}` : null);
     if (!ticketId) throw new ToolError("Only confirmed guests get a One Shot.");
+    // deposit events: showing up (check-in) is what unlocks the shot
+    if (event.depositCents > 0 && ticket && !ticket.checkedInAt)
+      return err("Check in at the door first — that unlocks your One Shot and releases your deposit.");
 
     const [existing] = await db
       .select({ id: tables.photos.id })

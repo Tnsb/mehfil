@@ -26,7 +26,7 @@ export async function requestLoginCode(
     expiresAt: new Date(Date.now() + CODE_TTL_MS),
   });
   // Delivery point: replace with a real email send later.
-  console.log(`\n  ✉️  TABLE login code for ${email}: ${code}\n`);
+  console.log(`\n  ✉️  plot login code for ${email}: ${code}\n`);
   return process.env.NODE_ENV !== "production" ? { devCode: code } : {};
 }
 

@@ -25,11 +25,18 @@ export function eventView(event: Event, opts: { includeAddress: boolean; seatsLe
   return {
     id: event.id,
     title: event.title,
+    ...(event.episodeNumber
+      ? { episode: `S${event.season ?? 1}E${event.episodeNumber}`, titleCard: event.titleCard }
+      : {}),
     vibe: event.vibe,
     description: event.description,
     template: event.template,
+    theme: event.theme,
     price: formatPrice(event.priceCents),
     priceCents: event.priceCents,
+    ...(event.depositCents > 0 ? { deposit: formatPrice(event.depositCents) } : {}),
+    mysterySeat: event.mysterySeat,
+    duoTickets: event.duoTickets,
     capacity: event.capacity,
     seatsLeft: opts.seatsLeft,
     startsAt: event.startsAt.toISOString(),

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toolAction } from "@/app/actions";
 import { toLocalDateTimeInput } from "@/lib/format";
+import { THEMES } from "@/themes";
 
 export function NewEventForm() {
   const router = useRouter();
@@ -31,6 +32,9 @@ export function NewEventForm() {
           startsAtIso: new Date(String(form.get("startsAt"))).toISOString(),
           locationHint: form.get("locationHint") || undefined,
           locationAddress: form.get("locationAddress") || undefined,
+          theme: form.get("theme") || undefined,
+          template: form.get("template") || "dinner",
+          showTitle: form.get("showTitle") || undefined,
         },
         ["/host"],
       );
@@ -67,6 +71,31 @@ export function NewEventForm() {
       <div>
         <label className="block text-sm font-semibold mb-1.5">Date & time</label>
         <input className="field" name="startsAt" type="datetime-local" defaultValue={defaultDate} required />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-semibold mb-1.5">Theme</label>
+          <select className="field" name="theme" defaultValue="classic">
+            {Object.values(THEMES).map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.emoji} {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold mb-1.5">Format</label>
+          <select className="field" name="template" defaultValue="dinner">
+            <option value="dinner">🍽 Dinner / party</option>
+            <option value="run_club">🏃 Run club (waiver + bibs)</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-semibold mb-1.5">
+          Show <span className="font-normal text-[color:var(--color-ink-faint)]">(optional — makes this an episode of a series)</span>
+        </label>
+        <input className="field" name="showTitle" placeholder="Sunday Gravy" />
       </div>
       <div>
         <label className="block text-sm font-semibold mb-1.5">Public location teaser</label>

@@ -15,14 +15,17 @@ import { runTool, SYSTEM_CONTEXT } from "@/agent/registry";
 import { emitDomainEvent } from "@/events/bus";
 import { postCohostMessage } from "@/cohost";
 import { VIBES } from "@/cohost/vibes";
+import { firePlotTwist } from "@/agent/tools/night";
 
 const AFTERPARTY_DELAY_MS = 12 * 60 * 60 * 1000;
 const HYPE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const TWIST_AFTER_MS = 45 * 60 * 1000; // twist lands once the night has settled in
 
 export async function schedulerTick(): Promise<{
   deliveredScheduled: number;
   afterpartiesFired: number;
   hypesDropped: number;
+  twistsFired: number;
 }> {
   const now = new Date();
 
@@ -89,5 +92,37 @@ export async function schedulerTick(): Promise<{
     hypes++;
   }
 
-  return { deliveredScheduled: due.length, afterpartiesFired: fired, hypesDropped: hypes };
+  // 4. mid-event plot twists: fire once per event with twist intensity on
+  const live = await db
+    .select()
+    .from(tables.events)
+    .where(
+      and(
+        inArray(tables.events.status, ["published", "sold_out"]),
+        lte(tables.events.startsAt, new Date(now.getTime() - TWIST_AFTER_MS)),
+        gt(tables.events.startsAt, new Date(now.getTime() - AFTERPARTY_DELAY_MS)),
+      ),
+    );
+  let twists = 0;
+  for (const event of live) {
+    if (event.twistIntensity === "off") continue;
+    const [already] = await db
+      .select({ id: tables.domainEvents.id })
+      .from(tables.domainEvents)
+      .where(
+        and(
+          eq(tables.domainEvents.type, "cohost.twist_fired"),
+          eq(tables.domainEvents.subjectId, event.id),
+        ),
+      );
+    if (already) continue;
+    if (await firePlotTwist(event.id)) twists++;
+  }
+
+  return {
+    deliveredScheduled: due.length,
+    afterpartiesFired: fired,
+    hypesDropped: hypes,
+    twistsFired: twists,
+  };
 }

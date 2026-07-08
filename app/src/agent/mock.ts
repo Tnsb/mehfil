@@ -229,6 +229,83 @@ export function streamMockResponse(ctx: ActorContext, messages: UIMessage[]) {
           if (!active) return say(writer, "No active event to retune. Create one first!");
           const res = await callTool(writer, ctx, "set_cohost_vibe", { eventId: active.id, vibe });
           say(writer, res.ok ? `${(res.data as { message: string }).message} It'll speak that way in **${active.title}**'s party chat.` : res.error);
+        } else if (wants("theme")) {
+          if (signedOut) return say(writer, "Sign in and I'll re-render your night.");
+          const themeKey = wants("y2k") ? "y2k" : wants("manor", "murder") ? "manor" : wants("chai", "monsoon") ? "chai" : wants("run", "finish") ? "finish_line" : "classic";
+          const list = await callTool(writer, ctx, "list_my_events", {});
+          const active = list.ok
+            ? (list.data as { events: { id: string; title: string; status: string }[] }).events.find((e) => e.status !== "completed" && e.status !== "cancelled")
+            : undefined;
+          if (!active) return say(writer, "No active event to theme. Create one first!");
+          const res = await callTool(writer, ctx, "update_event", { eventId: active.id, theme: themeKey });
+          say(writer, res.ok ? `**${active.title}** is now themed **${themeKey}** — new palette, film stock, superlatives, icebreakers, the works. Ask me for the playlist.` : res.error);
+        } else if (wants("playlist", "music")) {
+          if (signedOut) return say(writer, "Sign in and I'll queue it up.");
+          const list = await callTool(writer, ctx, "list_my_events", {});
+          const active = list.ok
+            ? (list.data as { events: { id: string; status: string }[] }).events.find((e) => e.status !== "cancelled")
+            : undefined;
+          if (!active) return say(writer, "No event yet — create one and the theme comes with a playlist.");
+          const res = await callTool(writer, ctx, "get_host_playlist", { eventId: active.id });
+          if (res.ok) {
+            const d = res.data as { theme: string; playlist: string; tracks: string[]; dressCode: string };
+            say(writer, `**${d.playlist}** (${d.theme}):\n\n${d.tracks.map((t) => `• ${t}`).join("\n")}\n\nDress code: ${d.dressCode}`);
+          } else say(writer, res.error);
+        } else if (wants("twist")) {
+          if (signedOut) return say(writer, "Sign in first — twists are a host lever.");
+          const list = await callTool(writer, ctx, "list_my_events", {});
+          const live = list.ok
+            ? (list.data as { events: { id: string; title: string; status: string; startsAt: string }[] }).events.find(
+                (e) => (e.status === "published" || e.status === "sold_out") && new Date(e.startsAt) < new Date(),
+              )
+            : undefined;
+          if (!live) return say(writer, "No live event right now — twists fire mid-night.");
+          const res = await callTool(writer, ctx, "trigger_plot_twist", { eventId: live.id });
+          say(writer, res.ok ? `Done. Dropped into **${live.title}**'s chat:\n\n> ${(res.data as { twist: string }).twist}` : res.error);
+        } else if (wants("tab", "log $", "owes", "settle")) {
+          if (signedOut) return say(writer, "Sign in and I'll open the tab.");
+          const mine = await callTool(writer, ctx, "get_my_tickets", {});
+          const recent = mine.ok
+            ? (mine.data as { tickets: { status: string; event: { id: string; title: string; startsAt: string } }[] }).tickets
+                .filter((t) => t.status === "paid" && new Date(t.event.startsAt) < new Date())
+                .sort((a, b) => +new Date(b.event.startsAt) - +new Date(a.event.startsAt))[0]?.event
+            : undefined;
+          const hosted = !recent
+            ? await callTool(writer, ctx, "list_my_events", {}).then((r) =>
+                r.ok
+                  ? (r.data as { events: { id: string; title: string; startsAt: string }[] }).events
+                      .filter((e) => new Date(e.startsAt) < new Date())
+                      .sort((a, b) => +new Date(b.startsAt) - +new Date(a.startsAt))[0]
+                  : undefined,
+              )
+            : undefined;
+          const target = recent ?? hosted;
+          if (!target) return say(writer, "No recent night to put a tab on.");
+          const amount = parsePrice(text);
+          if (amount > 0) {
+            const label = (text.match(/for\s+([a-z ]{2,30})/i)?.[1] ?? "shared costs").trim();
+            const res = await callTool(writer, ctx, "add_tab_item", { eventId: target.id, label, amountDollars: amount });
+            return say(writer, res.ok ? (res.data as { message: string }).message : res.error);
+          }
+          if (wants("settle", "request")) {
+            const res = await callTool(writer, ctx, "request_tab_payments", { eventId: target.id });
+            return say(writer, res.ok ? (res.data as { message: string }).message : res.error);
+          }
+          const res = await callTool(writer, ctx, "get_tab", { eventId: target.id });
+          if (res.ok) {
+            const d = res.data as { items: { label: string; amount: string; paidBy: string }[]; total: string; perHead: string };
+            say(writer, d.items.length === 0 ? `The tab for **${target.title}** is empty. Say "log $60 for pizza" to start it.` : `The Tab — **${target.title}**:\n\n${d.items.map((i) => `• ${i.label} (${i.paidBy}) — ${i.amount}`).join("\n")}\n\nTotal ${d.total} · ${d.perHead} a head.`);
+          } else say(writer, res.error);
+        } else if (wants("receipts", "my profile", "main cast")) {
+          if (signedOut) return say(writer, "Sign in and I'll pull your receipts.");
+          const res = await callTool(writer, ctx, "get_my_profile", {});
+          if (res.ok) {
+            const d = res.data as { receipts: { episodesThisYear: number; charactersMet: number; superlativeShelf: { category: string }[]; mainCast: string[]; shows: { title: string }[] } };
+            say(
+              writer,
+              `Your receipts:\n\n• ${d.receipts.episodesThisYear} episodes this year · ${d.receipts.charactersMet} characters met\n• Main cast: ${d.receipts.mainCast.join(", ") || "still casting"}\n• Shows: ${d.receipts.shows.map((s) => s.title).join(", ") || "none yet"}\n• Shelf: ${d.receipts.superlativeShelf.map((w) => w.category).join(" · ") || "no awards yet"}\n\nFull page: [/me](/me)`,
+            );
+          } else say(writer, res.error);
         } else if (wants("wrapped", "my stats", "how many nights", "people met", "connections")) {
           if (signedOut) return say(writer, "Sign in and I'll pull your Wrapped.");
           if (wants("connections", "people met", "who did i meet", "matches")) {
@@ -249,7 +326,7 @@ export function streamMockResponse(ctx: ActorContext, messages: UIMessage[]) {
             const w = res.data as { nightsOut: number; nightsHosted: number; topHost: { name: string; count: number } | null; oneShotsTaken: number; peopleMet: number };
             say(
               writer,
-              `Your TABLE Wrapped:\n\n• ${w.nightsOut} night${w.nightsOut === 1 ? "" : "s"} out · ${w.nightsHosted} hosted\n${w.topHost ? `• Night #${w.topHost.count} at ${w.topHost.name}'s is in the books\n` : ""}• ${w.oneShotsTaken} One Shot${w.oneShotsTaken === 1 ? "" : "s"} taken · ${w.peopleMet} people met`,
+              `Your plot Wrapped:\n\n• ${w.nightsOut} night${w.nightsOut === 1 ? "" : "s"} out · ${w.nightsHosted} hosted\n${w.topHost ? `• Night #${w.topHost.count} at ${w.topHost.name}'s is in the books\n` : ""}• ${w.oneShotsTaken} One Shot${w.oneShotsTaken === 1 ? "" : "s"} taken · ${w.peopleMet} people met`,
             );
           } else say(writer, res.error);
         } else if (wants("my tickets", "am i going", "what am i going")) {
@@ -285,8 +362,8 @@ export function streamMockResponse(ctx: ActorContext, messages: UIMessage[]) {
           say(
             writer,
             signedOut
-              ? `I'm the TABLE crew — I run paid dinners end to end. Try:\n\n• "What's happening this week?"\n• Sign in, then: "Host a six-course Oaxacan dinner Saturday, 10 seats, $85"`
-              : `I run your parties end to end. Try:\n\n• "Host a six-course Oaxacan dinner Saturday, 10 seats, $85"\n• "Who's coming to my dinner?"\n• "Make my cohost a formal butler"\n• "Run it back" · "Show my wrapped" · "How did it go?"\n\n(Heads up: I'm in offline mode — set ANTHROPIC_API_KEY for the full agent.)`,
+              ? `I'm the plot crew — I turn nights into episodes. Try:\n\n• "What's happening this week?"\n• Sign in, then: "Host a six-course Oaxacan dinner Saturday, 10 seats, $85"`
+              : `I run your episodes end to end. Try:\n\n• "Host a six-course Oaxacan dinner Saturday, 10 seats, $85"\n• "Set the theme to y2k" · "What's the playlist?"\n• "Log $60 for pizza" · "Settle the tab"\n• "Fire a plot twist" · "Run it back" · "Show my receipts"\n\n(Heads up: I'm in offline mode — set ANTHROPIC_API_KEY for the full agent.)`,
           );
         }
       } catch (e) {

@@ -8,6 +8,8 @@ import { db, tables } from "@/db";
 import { Shell } from "@/components/shell";
 import { getCurrentUser } from "@/lib/auth";
 import { formatDateTime, formatPrice } from "@/lib/format";
+import { effectivePriceCents } from "@/agent/tools/tickets";
+import type { TicketKind } from "@/db/schema";
 import { PayButton } from "./pay-button";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +31,10 @@ export default async function MockPayPage({
   if (ticket.status === "paid") redirect(`/e/${event.id}/success?ticket=${ticket.id}`);
   if (ticket.status !== "pending") redirect(`/e/${event.id}`);
 
+  const dueCents = effectivePriceCents(event, ticket.kind as TicketKind);
+  const seatLabel =
+    ticket.kind === "duo_lead" ? "2 seats (duo)" : ticket.kind === "mystery" ? "1 mystery seat" : "1 seat";
+
   return (
     <Shell>
       <div className="mx-auto max-w-md px-4 py-10">
@@ -40,8 +46,8 @@ export default async function MockPayPage({
 
         <div className="card p-6 mt-6 space-y-4">
           <div className="flex justify-between items-baseline">
-            <span className="font-semibold">1 seat</span>
-            <span className="font-display text-2xl font-semibold">{formatPrice(event.priceCents)}</span>
+            <span className="font-semibold">{seatLabel}</span>
+            <span className="font-display text-2xl font-semibold">{formatPrice(dueCents)}</span>
           </div>
           <div className="space-y-3 opacity-60 pointer-events-none select-none">
             <input className="field" defaultValue="4242 4242 4242 4242" readOnly />
@@ -50,7 +56,7 @@ export default async function MockPayPage({
               <input className="field" defaultValue="424" readOnly />
             </div>
           </div>
-          <PayButton ticketId={ticket.id} eventId={event.id} label={`Pay ${formatPrice(event.priceCents)}`} />
+          <PayButton ticketId={ticket.id} eventId={event.id} label={`Pay ${formatPrice(dueCents)}`} />
           <p className="text-xs text-center text-[color:var(--color-ink-faint)]">
             Set STRIPE_SECRET_KEY to swap this for real Stripe Checkout.
           </p>

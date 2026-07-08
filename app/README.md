@@ -1,34 +1,65 @@
-# TABLE — the AI-native party app
+# plot — main character energy, as a service
 
-> Text one sentence. Get a whole party.
+> Every event is an episode. Every crew is a show. Your profile is the receipts.
 
-An AI-native MVP where the agent **is** the interface: hosts describe a dinner in one
+An AI-native app where the agent **is** the interface: hosts describe a night in one
 sentence, a crew of agents builds the page, sells the seats (address revealed only after
-payment), backfills cancellations from the waitlist, and fires the **AfterParty Drop**
-the morning after.
+payment), runs the night, and fires **the Reveal** the morning after.
 
-The consumer layer on top of that quiet engine:
+**BEFORE — anticipation:**
 
-- **The AI Cohost** — every party gets a character in its group chat: welcomes each paid
-  guest, assigns who brings what, answers "what's the address again?" at 2am, drops a
-  T-24h hype message, and hands out end-of-night superlatives. Hosts pick its vibe:
-  chaotic bestie 😜, formal butler 🎩, or unhinged hype man 📣.
-- **One Shot** — each guest gets exactly **one** photo for the whole night (enforced by a
-  DB unique constraint, not an honor system). The roll stays sealed and "develops"
-  overnight, revealing on the Drop page the next morning.
-- **Invites that are little worlds** — every paid guest gets a personalized card
-  ("🌙 The Last to Leave") and a bring-duty, assigned at payment.
-- **The AfterParty Drop** (`/drop/[eventId]`) — the One Shot reveal, a Wrapped-style card
-  ("your 7th night at Maya's"), mutual-tap connections, and feedback.
-- **Taps** — tap someone from the night as 🫶 **Vibe** (friend), ⚡ **Collab**
-  (build/work/run together), or 💘 **Crush**. Pure double-blind: nothing is ever revealed
-  unless both people tap each other with the *same* intent. Taps unlock at the morning
-  reveal alongside the One Shot roll and close 48 hours later — one ritual, one reason
-  everyone opens the app the next morning. On a match, **the Cohost plays wingman**: it
-  opens the pair's private chat with receipts from the night ("Leo was 🌙 The Last to
-  Leave · his One Shot: 'the 18-hour broth moment'") so nobody sends a cold "hey".
-- **Run it back** — one tap clones a completed event a week out; when the sequel is
-  published, everyone from last time automatically gets first-access notifications.
+- **Themes re-render the night** — House Classic 🏠, Y2K Rooftop 📟, Murder at the Manor 🕯️,
+  Monsoon Chai 🌧️, Finish Line 🏁. A theme swaps the palette, the One Shot film stock,
+  the superlative categories, the icebreakers, the dress code, and a one-tap playlist.
+- **Drop mechanics** — live countdown, "Maya and 5 others are going", and early access:
+  when a show's sequel publishes, past guests get 6 hours before the link goes wide.
+- **The mystery seat** 🎭 — one blind ticket per event at 20% off (host opt-in).
+- **Duo tickets** 👯 — two seats at 10% off each; the +1 claims via a link and must be
+  **new to plot** (structural growth loop).
+- **Refundable deposits** 🤝 — free events can hold a deposit that's released the moment
+  you check in at the door. Flaking dies.
+- **Vibe check** — a 30-second one-tap quiz at booking that assigns teams and feeds the
+  wingman ("you both picked 3am deep talks").
+- **Personal referral links** — every booked guest gets one; roster shows who brought whom.
+- **Run clubs as a vertical** — the `run_club` template adds waivers and bib numbers; the
+  theme handles the rest.
+
+**DURING — the night runs itself:**
+
+- **The AI Cohost** — welcomes each paid guest, assigns bring-duties, answers "what's the
+  address again?" at 2am. Vibes: chaotic bestie 😜, formal butler 🎩, hype man 📣.
+- **Plot twists** 🌀 — set an intensity (chill/spicy/chaos) and the Cohost fires one
+  mid-event surprise into the chat (scheduler-driven; hosts can also fire manually).
+- **One Shot** — one photo per guest, rendered as a **film still at capture** (theme film
+  stock, grain, letterbox/polaroid/VHS frame, title burned in). Sealed until morning.
+- **Overheard** 🗣 — anonymously log the wild things people say; the best become
+  typographic cards at the Reveal. Host moderation optional.
+- **Superlative voting** 🗳 — secret ballots during the night (categories from the theme),
+  winners crowned at the Reveal.
+- **Lost & Found** 🧣 — snap what someone left behind, straight into the party chat.
+- **The Tab** 💸 — "log $60 for pizza" → even split across attendees → payment requests
+  with the memory attached.
+
+**AFTER — the Reveal (`/drop/[eventId]`):**
+
+- **The episode title card** — the Cohost names the night from what actually happened
+  ("The 18-Hour Broth Incident"), LLM or offline.
+- The One Shot roll **develops** (blur-to-sharp), Overheard cards, award winners, the Tab,
+  a Wrapped card, and **story-still export** (9:16 share card).
+- **Taps** — tap anyone from the night as 🫶 Vibe, ⚡ Collab, or 💘 Crush. Pure
+  double-blind, same-intent matches only, 48h window. On a match the **Cohost plays
+  wingman** with receipts from the night — including vibe-check overlap and (opt-in)
+  automatic IG handle exchange.
+- **Recap** (`/recap/[id]`) — story-format auto-advancing highlight reel.
+- **Run it back** — clones the night a week out and files it under a **show**.
+
+**IDENTITY — episodes & seasons:**
+
+- **Shows** (`/show/[id]`) — recurring nights become series with an episode archive
+  ("S1E4 · 'The Pineapple Incident'"). Hosts close seasons; the **Season Finale**
+  (`/show/[id]/finale/[n]`) is an auto-generated trailer for the season the crew lived.
+- **Your receipts** (`/me`) — episodes this year, characters met, superlative shelf, main
+  cast, your shows. Proof of a life, not a feed. IG handle + share opt-in live here.
 
 ## Run it (zero config)
 
@@ -45,28 +76,28 @@ deterministic offline agent. Both upgrade to the real thing with env vars (see b
 
 | Who | Email | What you'll see |
 |---|---|---|
-| Host | `maya@table.demo` | Dashboard with a live dinner, a sold-out dinner with a waitlist, and a completed dinner with a developed One Shot roll + AfterParty Drop |
-| Guest | `leo@table.demo` | Tickets, a waitlist spot, a party chat with the Cohost, a persona card, and a mutual connection |
+| Host | `maya@table.demo` | "Maya's Table" show (S1E1 completed, S1E2 live with mystery seat + duo tickets), theme picker, night mechanics, Overheard moderation |
+| Guest | `leo@table.demo` | Tickets, a party chat with the Cohost, a persona card, a collab match with an IG exchange, and receipts on `/me` |
 | Anyone | any email | Fresh account, can book or host immediately |
 
-**A 2-minute demo script**
+**A 3-minute demo script**
 
 1. Sign in as `maya@table.demo`, open **Crew** (chat), type:
    *"Host a six-course Oaxacan dinner Saturday, 10 seats, $85"* → the agent creates a draft.
-2. Say *"publish and accept terms"* → live shareable event page.
-3. Sign out, sign in as any new email, open the event from **Explore**, book a seat,
-   "pay" on the mock checkout → the address unseals and the **party chat** opens — the
-   Cohost welcomes you with your persona card and bring-duty. Ask it
-   *"what's the address again?"*.
-4. Sign in as `leo@table.demo` → open `/drop/…` from the inbox: the developed One Shot
-   roll, your Wrapped card, and the Taps window (closes in ~42h). Tap Priya as 💘 Crush —
-   she already tapped you, so it matches live and the Cohost opens your chat with
-   receipts from the night. (Tap her as anything else and neither of you ever finds out.)
-5. Back as Maya: **Hosting** → the completed "Backyard Ramen Night" → AfterParty summary,
-   then hit **Run it back** on its Drop page to spawn the sequel with first access for
-   past guests.
-6. `curl localhost:3000/api/cron` — the scheduler tick that fires AfterParty Drops ~12h
-   after each dinner, drops T-24h Cohost hype messages, and delivers scheduled reminders.
+   Try *"set the theme to y2k"* and *"what's the playlist?"*.
+2. Say *"publish and accept terms"* → live shareable event page with countdown + social proof.
+3. Sign out, sign in as any new email, open the live episode from **Explore** — note the
+   🎭 mystery seat and 👯 duo options, take the vibe check, book, "pay" on the mock
+   checkout → the address unseals and the **party chat** opens.
+4. Sign in as `leo@table.demo` → the Reveal (`/drop/…` from the inbox): the episode title
+   card, the roll **developing**, Overheard cards, award winners, the Tab (log a cost,
+   host can settle up), and the Taps window. Tap Priya as 💘 Crush — she already tapped
+   you, so it matches live and the Cohost opens your chat with receipts.
+   Hit **▶ Play the recap** for the story-format highlight reel.
+5. Check `/me` — episodes, characters met, the superlative shelf, your shows. Open the
+   show archive → as Maya, **wrap season 1** and watch the Season Finale trailer.
+6. `curl localhost:3000/api/cron` — the scheduler tick: auto-Reveals ~12h after each
+   night, T-24h hype messages, **mid-event plot twists**, and scheduled reminders.
 
 ## Environment (all optional)
 
@@ -87,23 +118,33 @@ src/
 │   ├── types.ts          Tool definition primitives + ActorContext (the security boundary)
 │   ├── registry.ts       runTool() — the single choke point for ALL actions
 │   ├── tools/            ← every app capability lives here, one file per domain
-│   │   ├── events.ts       create/update/publish/list/run_it_back (Setup agent)
-│   │   ├── tickets.ts      book/cancel/roster/waitlist/payments (Door agent)
-│   │   ├── party.ts        party chat: get/post messages, set_cohost_vibe
+│   │   ├── events.ts       create/update/publish/list/run_it_back (+ themes, shows,
+│   │   │                   early-access publicAt) (Setup agent)
+│   │   ├── tickets.ts      book (standard/mystery/duo, vibe check, waiver, referral,
+│   │   │                   deposits), claim_duo_seat, check_in_guest, roster (Door agent)
+│   │   ├── party.ts        party chat: get/post messages (+ Lost & Found images),
+│   │   │                   set_cohost_vibe
+│   │   ├── night.ts        vote_superlative + tally, trigger_plot_twist, get_host_playlist
+│   │   ├── overheard.ts    submit/get/moderate anonymous quotes
+│   │   ├── tab.ts          add_tab_item, get_tab (even split), request_tab_payments
 │   │   ├── oneshot.ts      take_one_shot, get_photo_roll (sealed → developed)
-│   │   ├── afterparty.ts   run_afterparty, submit_feedback, summary (AfterParty agent)
+│   │   ├── afterparty.ts   run_afterparty (+ title card, deposit forfeits), feedback
 │   │   ├── social.ts       Taps: tap_connect (3 intents, double-blind, 48h window),
 │   │   │                   match chats, get_my_connections, get_my_wrapped
-│   │   ├── activity.ts     get_my_activity (the "last N dinners" log), discover_events
+│   │   ├── shows.ts        get_show, close_season, get_my_profile (receipts), set_profile
+│   │   ├── activity.ts     get_my_activity (the "last N nights" log), discover_events
 │   │   └── index.ts        the tool manifest — register new tools here
 │   ├── chat.ts           registry → AI SDK adapter + system prompt (real agent)
 │   └── mock.ts           deterministic offline agent (no API key needed)
-├── cohost/               the AI Cohost: 3 personalities (vibes.ts) + reply engine —
+├── themes/               the identity engine: 5 theme packs (palette, film stock,
+│                         superlatives, icebreakers, twists, playlist) + the vibe check
+├── cohost/               the AI Cohost: 3 personalities (vibes.ts), reply engine,
+│                         wingman (vibe overlap + IG exchange), episode title cards —
 │                         LLM in character when a key is set, canned heuristics offline
 ├── events/bus.ts         domain-event bus + append-only activity log
 ├── notifications/        ISOLATED module: rules (event→notification), delivery
 │   │                     adapters (in_app today; push/SMS = new adapter later),
-│   └── scheduler.ts      the cron tick (reminders, auto-AfterParty)
+│   └── scheduler.ts      the cron tick (reminders, auto-Reveal, hype, plot twists)
 ├── payments/             PaymentProvider interface: mock + Stripe (Connect later)
 ├── db/schema.ts          Drizzle schema — SQLite now, Postgres-ready
 ├── lib/auth.ts           passwordless email-code sessions

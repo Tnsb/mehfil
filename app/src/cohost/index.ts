@@ -13,6 +13,7 @@ import { db, tables } from "@/db";
 import { newId } from "@/lib/ids";
 import type { Event, Message, TapIntent, User } from "@/db/schema";
 import { TAP_INTENTS, matchThread } from "@/lib/taps";
+import { vibeOverlap } from "@/themes";
 import { VIBES } from "./vibes";
 
 export async function postCohostMessage(
@@ -44,11 +45,13 @@ export async function postWingmanOpener(
 
   /* gather what actually happened at the table */
   const facts: string[] = [];
+  const ticketsByUser: Record<string, { vibeAnswers: Record<string, string> | null; team: string | null }> = {};
   for (const u of [userA, userB]) {
     const [ticket] = await db
       .select()
       .from(tables.tickets)
       .where(and(eq(tables.tickets.eventId, event.id), eq(tables.tickets.userId, u.id)));
+    ticketsByUser[u.id] = { vibeAnswers: ticket?.vibeAnswers ?? null, team: ticket?.team ?? null };
     if (ticket?.persona) facts.push(`${u.name} was ${ticket.persona.emoji} ${ticket.persona.card}`);
     if (ticket?.bringItem) facts.push(`${u.name} brought ${ticket.bringItem}`);
     const [photo] = await db
@@ -58,6 +61,19 @@ export async function postWingmanOpener(
     if (photo?.caption) facts.push(`${u.name}'s One Shot: "${photo.caption}"`);
   }
 
+  // "you were both team green at trivia" — vibe-check overlap leads
+  const a = ticketsByUser[userA.id];
+  const b = ticketsByUser[userB.id];
+  if (a?.team && a.team === b?.team) facts.unshift(`you were both ${a.team} tonight`);
+  const overlap = vibeOverlap(a?.vibeAnswers, b?.vibeAnswers);
+  if (overlap) facts.unshift(overlap);
+
+  // opt-in IG handle auto-exchange — because "what's their @" IS the morning-after behavior
+  const handles =
+    userA.shareHandleOnMatch && userB.shareHandleOnMatch && userA.igHandle && userB.igHandle
+      ? `\n\n📸 handles, exchanged: @${userA.igHandle.replace(/^@/, "")} ↔ @${userB.igHandle.replace(/^@/, "")}`
+      : "";
+
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const { text } = await generateText({
@@ -66,7 +82,7 @@ export async function postWingmanOpener(
 You are the AI Cohost of "${event.title}" playing wingman. ${userA.name} and ${userB.name} both tapped each other as ${meta.emoji} ${meta.label} (${meta.hint}) after the event. Open their private chat with ONE short message (2-3 sentences) that connects them using real details from the night, then hand the conversation to them. Never mention taps that didn't match.`,
         prompt: `Details from the night:\n${facts.join("\n") || "(no extra details — riff on the event itself)"}\nEvent: ${event.title} — ${event.vibe ?? ""}`,
       });
-      return await postCohostMessage(event.id, text.trim(), thread);
+      return await postCohostMessage(event.id, text.trim() + handles, thread);
     } catch (err) {
       console.error("[cohost] wingman LLM failed, falling back:", err);
     }
@@ -81,7 +97,7 @@ You are the AI Cohost of "${event.title}" playing wingman. ${userA.name} and ${u
     collab: `${userA.name} + ${userB.name} — mutual ${meta.emoji} Collab tap. ${detail} Consider this your first standup. What are you building?`,
     crush: `well well WELL. ${userA.name} + ${userB.name} — you both tapped ${meta.emoji} Crush and neither of you would've known otherwise. ${detail} No cold "hey" allowed, I already warmed it up.`,
   };
-  return await postCohostMessage(event.id, openers[intent], thread);
+  return await postCohostMessage(event.id, openers[intent] + handles, thread);
 }
 
 /** Should the cohost jump in on this guest message? */

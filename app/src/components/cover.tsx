@@ -28,21 +28,24 @@ export function Cover({
   seed,
   className,
   children,
+  theme,
 }: {
   seed: string;
   className?: string;
   children?: React.ReactNode;
+  /** theme palette override — themes re-render the night, not re-skin it */
+  theme?: { from: string; to: string; accent: string; emoji?: string };
 }) {
+  const style = theme
+    ? { background: `linear-gradient(125deg, ${theme.from}, ${theme.to} 62%, ${theme.accent})` }
+    : coverStyle(seed);
   return (
-    <div
-      className={`relative overflow-hidden ${className ?? ""}`}
-      style={coverStyle(seed)}
-    >
+    <div className={`relative overflow-hidden ${className ?? ""}`} style={style}>
       <span
         aria-hidden
         className="absolute -right-4 -bottom-6 text-[7rem] opacity-30 select-none rotate-12"
       >
-        {coverEmoji(seed)}
+        {theme?.emoji ?? coverEmoji(seed)}
       </span>
       {children}
     </div>
